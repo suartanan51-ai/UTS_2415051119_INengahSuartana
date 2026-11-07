@@ -37,14 +37,8 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
 
     final task = widget.task;
 
-    _title = TextEditingController(
-      text: task?.title ?? '',
-    );
-
-    _course = TextEditingController(
-      text: task?.course ?? '',
-    );
-
+    _title = TextEditingController(text: task?.title ?? '');
+    _course = TextEditingController(text: task?.course ?? '');
     _description = TextEditingController(
       text: task?.description ?? '',
     );
@@ -63,7 +57,24 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
     super.dispose();
   }
 
+  Future<void> _selectDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _dueDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+    );
+
+    if (picked != null && mounted) {
+      setState(() {
+        _dueDate = picked;
+      });
+    }
+  }
+
   Future<void> _save() async {
+    if (_saving) return;
+
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -85,33 +96,48 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
     try {
       final provider = context.read<TaskProvider>();
 
-      if (widget.task == null) {
-        await provider.addTask(task);
-      } else {
-        await provider.updateTask(task);
-      }
+      final success = widget.task == null
+          ? await provider.addTask(task)
+          : await provider.updateTask(task);
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            widget.task == null
-                ? 'Tugas berhasil ditambahkan.'
-                : 'Tugas berhasil diperbarui.',
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              widget.task == null
+                  ? 'Tugas berhasil ditambahkan.'
+                  : 'Tugas berhasil diperbarui.',
+            ),
           ),
-        ),
-      );
+        );
 
-      Navigator.pop(context);
+        Navigator.pop(context, true);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              provider.operationError ??
+                  'Gagal menyimpan tugas. Silakan coba lagi.',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Gagal menyimpan tugas: $e'),
+        const SnackBar(
+          content: Text(
+            'Terjadi kesalahan saat menyimpan tugas.',
+          ),
+          backgroundColor: Colors.red,
         ),
       );
+
+      debugPrint('Save task screen error: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -138,8 +164,11 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
           children: [
             TextFormField(
               controller: _title,
+              maxLength: 100,
+              textCapitalization: TextCapitalization.sentences,
               decoration: const InputDecoration(
                 labelText: 'Nama tugas',
+                hintText: 'Masukkan nama tugas',
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.assignment),
               ),
@@ -147,6 +176,11 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                 if (value == null || value.trim().isEmpty) {
                   return 'Nama tugas wajib diisi.';
                 }
+
+                if (value.trim().length < 3) {
+                  return 'Nama tugas minimal 3 karakter.';
+                }
+
                 return null;
               },
             ),
@@ -155,8 +189,11 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
 
             TextFormField(
               controller: _course,
+              maxLength: 60,
+              textCapitalization: TextCapitalization.words,
               decoration: const InputDecoration(
                 labelText: 'Mata kuliah',
+                hintText: 'Masukkan nama mata kuliah',
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.menu_book),
               ),
@@ -164,6 +201,11 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                 if (value == null || value.trim().isEmpty) {
                   return 'Mata kuliah wajib diisi.';
                 }
+
+                if (value.trim().length < 2) {
+                  return 'Nama mata kuliah terlalu pendek.';
+                }
+
                 return null;
               },
             ),
@@ -173,8 +215,11 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
             TextFormField(
               controller: _description,
               maxLines: 4,
+              maxLength: 500,
+              textCapitalization: TextCapitalization.sentences,
               decoration: const InputDecoration(
                 labelText: 'Deskripsi',
+                hintText: 'Tambahkan keterangan tugas (opsional)',
                 border: OutlineInputBorder(),
                 alignLabelWithHint: true,
               ),
@@ -187,6 +232,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
               decoration: const InputDecoration(
                 labelText: 'Prioritas',
                 border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.flag),
               ),
               items: ['Rendah', 'Sedang', 'Tinggi']
                   .map(
@@ -196,30 +242,21 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                     ),
                   )
                   .toList(),
-              onChanged: (value) {
-                setState(() {
-                  _priority = value ?? 'Sedang';
-                });
-              },
+              onChanged: _saving
+                  ? null
+                  : (value) {
+                      if (value != null) {
+                        setState(() {
+                          _priority = value;
+                        });
+                      }
+                    },
             ),
 
             const SizedBox(height: 14),
 
             OutlinedButton.icon(
-              onPressed: () async {
-                final picked = await showDatePicker(
-                  context: context,
-                  initialDate: _dueDate,
-                  firstDate: DateTime(2020),
-                  lastDate: DateTime(2100),
-                );
-
-                if (picked != null) {
-                  setState(() {
-                    _dueDate = picked;
-                  });
-                }
-              },
+              onPressed: _saving ? null : _selectDate,
               icon: const Icon(Icons.calendar_month),
               label: Text(
                 'Tenggat: ${_dueDate.day}/${_dueDate.month}/${_dueDate.year}',
@@ -231,7 +268,13 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
             FilledButton(
               onPressed: _saving ? null : _save,
               child: _saving
-                  ? const CircularProgressIndicator()
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                      ),
+                    )
                   : Text(
                       editing
                           ? 'Simpan Perubahan'
